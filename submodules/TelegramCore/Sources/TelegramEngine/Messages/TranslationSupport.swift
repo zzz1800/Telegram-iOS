@@ -94,6 +94,8 @@ public final class TranslationProviderSettingsStore {
             // 密钥只从 Keychain 读，绝不落 UserDefaults
             s.baiduKey = TranslationKeychain.get(account: "baiduKey") ?? s.baiduKey
         }
+        // 配置文件优先：Documents/tgtranslate.json（见 docs/配置说明.md）
+        TranslationConfigFile.apply(to: &s)
         return s
     }
 

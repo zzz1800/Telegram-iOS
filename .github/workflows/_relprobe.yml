@@ -1,0 +1,30 @@
+name: RelProbe
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: make dummy ipa
+        run: |
+          mkdir -p out
+          echo "dummy ipa payload" > out/Telegram.ipa
+          ls -l out
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram.ipa
+          path: out/Telegram.ipa
+          retention-days: 1
+          if-no-files-found: error
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: probe-${{ github.run_number }}
+          name: probe release
+          files: out/Telegram.ipa
+          fail_on_unmatched_files: true
+          body: probe

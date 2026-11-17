@@ -191,16 +191,9 @@ public func translateMessageIds(context: AccountContext, messageIds: [EngineMess
             }
         }
         
-        let translationConfiguration = TranslationConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 })
-        var enableLocalIfPossible = false
-        switch translationConfiguration.auto {
-        case .system:
-            if #available(iOS 18.0, *) {
-                enableLocalIfPossible = true
-            }
-        default:
-            break
-        }
+        // TGTranslate: 本地通道（Google / 百度）优先，不再依赖服务端 translation.auto 与 iOS 18。
+        // 未配置任何通道时此值为 true 也无害：service 返回 nil，引擎自动回退官方 MTProto。
+        var enableLocalIfPossible = true
         return context.engine.messages.translateMessages(messageIds: messageIdsToTranslate, fromLang: fromLang, toLang: toLang, enableLocalIfPossible: enableLocalIfPossible)
         |> `catch` { _ -> Signal<Never, NoError> in
             return .complete()

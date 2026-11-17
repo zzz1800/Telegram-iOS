@@ -570,6 +570,15 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
 }
 
 public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
+    // TGTranslate: 出站自动翻译（中文 → 目标语言）。开关关闭时 translationOutboundTransform 原样透传，
+    // 行为与本补丁未应用时完全一致。
+    return translationOutboundTransform(account: account, peerId: peerId, messages: messages)
+    |> mapToSignal { transformedMessages in
+        return enqueueMessagesTransformed(account: account, peerId: peerId, messages: transformedMessages)
+    }
+}
+
+private func enqueueMessagesTransformed(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
     let signal: Signal<[(Bool, EnqueueMessage)], NoError>
     if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {
         signal = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)

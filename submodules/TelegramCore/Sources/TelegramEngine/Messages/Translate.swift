@@ -30,6 +30,16 @@ public enum TranslationTone: String {
 }
 
 func _internal_translate(network: Network, text: String, toLang: String, entities: [MessageTextEntity] = [], tone: TranslationTone = .neutral, peer: Api.InputPeer? = nil, messageId: Int32? = nil) -> Signal<(String, [MessageTextEntity])?, TranslationError> {
+    if let service = engineExperimentalInternalTranslationService {
+        return service.translate(texts: [AnyHashable(0): text], fromLang: "auto", toLang: toLang)
+        |> map { result -> (String, [MessageTextEntity])? in
+            guard let translated = result?[AnyHashable(0)] else {
+                return nil
+            }
+            return (translated, [])
+        }
+        |> castError(TranslationError.self)
+    }
     var flags: Int32 = 0
 
     if tone != .neutral {
@@ -78,6 +88,17 @@ func _internal_translate(network: Network, text: String, toLang: String, entitie
 }
 
 func _internal_composeMessageWithAI(account: Account, text: String, entities: [MessageTextEntity], proofread: Bool = false, translateToLang: String? = nil, changeStyle: TelegramComposeAIMessageMode.CloudStyle.Reference? = nil, emojify: Bool = false) -> Signal<(String, [MessageTextEntity]), TranslationError> {
+    if let toLang = translateToLang, !proofread, changeStyle == nil, !emojify,
+       let service = engineExperimentalInternalTranslationService {
+        return service.translate(texts: [AnyHashable(0): text], fromLang: "auto", toLang: toLang)
+        |> map { result -> (String, [MessageTextEntity]) in
+            guard let translated = result?[AnyHashable(0)] else {
+                return (text, entities)
+            }
+            return (translated, [])
+        }
+        |> castError(TranslationError.self)
+    }
     var flags: Int32 = 0
     if proofread {
         flags |= (1 << 0)
@@ -172,6 +193,22 @@ func _internal_composeRichMessageWithAI(account: Account, instantPage: InstantPa
 }
 
 func _internal_translateTexts(network: Network, texts: [(String, [MessageTextEntity])], toLang: String, tone: TranslationTone = .neutral) -> Signal<[(String, [MessageTextEntity])], TranslationError> {
+    if let service = engineExperimentalInternalTranslationService {
+        var payload: [AnyHashable: String] = [:]
+        for (index, item) in texts.enumerated() {
+            payload[AnyHashable(index)] = item.0
+        }
+        return service.translate(texts: payload, fromLang: "auto", toLang: toLang)
+        |> map { result in
+            texts.enumerated().map { index, item -> (String, [MessageTextEntity]) in
+                guard let translated = result?[AnyHashable(index)] else {
+                    return item
+                }
+                return (translated, [])
+            }
+        }
+        |> castError(TranslationError.self)
+    }
     var flags: Int32 = 0
     flags |= (1 << 1)
     
@@ -230,6 +267,7 @@ public protocol ExperimentalInternalTranslationService: AnyObject {
 }
 
 public var engineExperimentalInternalTranslationService: ExperimentalInternalTranslationService?
+    = MultiProviderTranslationService.shared
 
 /// Translates rich messages (those carrying a `RichTextMessageAttribute`) by id via
 /// `messages.translateRichMessage`, stores each result as a `TranslationMessageAttribute` with the

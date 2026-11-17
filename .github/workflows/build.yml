@@ -1,109 +1,178 @@
-name: CI
+name: Build TGTranslate IPA
+
+# 放到 fork 仓库的 .github/workflows/build.yml
+# 与官方 .github/workflows/build.yml 的差异：
+#   1. runs-on 从钉死的 macos-13 改成可用的新版 runner（见 RUNNER_LABEL）
+#   2. 构建加 --overrideXcodeVersion，避免 versions.json 要求 Xcode 27.1 而 runner 没有时直接失败
+#   3. 用 softprops/action-gh-release 取代已废弃的 actions/create-release@v1 + upload-release-asset@v1
+#   4. IPA 走 Release asset（不占 Free 计划 500MB artifact 额度）
+#   5. 打印环境自检信息，便于对照 CI-TROUBLESHOOTING.md 定位失败点
 
 on:
   push:
     branches: [ master ]
-
+  # macOS 额度耗尽期间靠定时任务自动重抢：额度一恢复，任意一次就会跑完并自动发 Release
+  schedule:
+    - cron: "17 */2 * * *"
   workflow_dispatch:
+    inputs:
+      override_xcode:
+        description: "忽略 versions.json 的 Xcode 版本要求"
+        type: boolean
+        default: true
+      runner:
+        description: "runner 标签（macos-15 / macos-26；空=macos-15）"
+        type: string
+        default: "macos-15"
+
+env:
+  # 注意：runs-on 不接受 env 上下文（GitHub 会报 Unrecognized named-value: 'env'），
+  # 所以 runner 标签必须写字面量，见下面 jobs.build.runs-on。
+  # 可选值：macos-15 / macos-26
+  # 构建目录（官方要求路径稳定，源码路径会进二进制）
+  SOURCE_DIR: /Users/Shared/telegram-ios
 
 jobs:
   build:
-    runs-on: macos-13
+    # inputs 上下文可用于 runs-on（env 不行）；push 触发时 inputs 为空 → 回退 macos-15
+    runs-on: ${{ inputs.runner || 'macos-15' }}
+    timeout-minutes: 150
 
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout（子模块由下一步手动拉，需要完整历史给 build number）
+        uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
-          fetch-depth: '0'
+          # 关键：不能让 actions/checkout 拉子模块。.gitmodules 里有相对 URL（../tgcalls.git），
+          # GitHub 会把它解析成 <fork 属主>/tgcalls → 404（实测报错：zzz1800/tgcalls not found）。
+          submodules: false
+          fetch-depth: 0
 
-      - name: Set active Xcode path
+      - name: 纠正相对子模块 URL 并拉取子模块
         run: |
-          XCODE_VERSION=$(cat versions.json | python3 -c 'import json,sys;obj=json.load(sys.stdin);print(obj["xcode"]);')
-          sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
+          set -x
+          # 把所有 ../xxx 形式的 url 改成上游绝对地址（目前只有 tgcalls 一处，写成通用规则防以后新增）
+          python3 - <<'EOF'
+          import subprocess
+          out = subprocess.check_output(
+              ["git", "config", "--file", ".gitmodules", "--get-regexp", "url"], text=True)
+          for line in out.strip().splitlines():
+              key, url = line.split(None, 1)
+              if url.strip().startswith("../"):
+                  name = url.strip().rstrip("/").split("/")[-1]
+                  new = "https://github.com/TelegramMessenger/" + name
+                  subprocess.check_call(["git", "config", "--file", ".gitmodules", key, new])
+                  print("rewrite", key, url.strip(), "->", new)
+          EOF
+          git submodule sync --recursive
+          git submodule update --init --recursive --jobs 8
 
-      - name: Create canonical source directory
+      - name: 环境自检（失败时先看这一步的日志）
+        run: |
+          set -x
+          sw_vers
+          xcodebuild -version || true
+          ls /Applications | grep -i xcode || true
+          python3 --version
+          git --version
+          df -h /
+          echo "--- versions.json ---"
+          cat versions.json
+
+      - name: 选择 Xcode
+        run: |
+          WANTED=$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')
+          echo "versions.json 要求 Xcode: $WANTED"
+          if [ -d "/Applications/Xcode_$WANTED.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_$WANTED.app/Contents/Developer"
+            echo "使用 Xcode_$WANTED"
+          else
+            INSTALLED=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+            echo "未安装 Xcode_$WANTED，回退到 $INSTALLED（配合 --overrideXcodeVersion）"
+            sudo xcode-select -s "$INSTALLED/Contents/Developer"
+          fi
+          xcodebuild -version
+
+      - name: 规范化源码目录
         run: |
           set -x
           sudo mkdir -p /Users/Shared
-          cp -R $GITHUB_WORKSPACE /Users/Shared/
-          mv /Users/Shared/$(basename $GITHUB_WORKSPACE) /Users/Shared/telegram-ios
+          sudo rm -rf "$SOURCE_DIR"
+          sudo cp -R "$GITHUB_WORKSPACE" "$SOURCE_DIR"
+          sudo chown -R "$(id -u):$(id -g)" "$SOURCE_DIR"
 
-      - name: Build the App
+      - name: 计算 build number
+        id: buildnum
+        run: |
+          cd "$SOURCE_DIR"
+          OFFSET="$(cat build_number_offset)"
+          COUNT="$(git rev-list --count HEAD)"
+          BUILD_NUMBER="$((COUNT + OFFSET))"
+          APP_VERSION="$(python3 -c 'import json;print(json.load(open("versions.json"))["app"])')"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD_NUMBER app=$APP_VERSION"
+
+      - name: 导入伪造签名证书（TrollStore 装未签名包，不需要真实证书）
+        run: |
+          cd "$SOURCE_DIR"
+          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+
+      - name: 续签假描述文件（仓库自带的那批已于 2026-10-30 过期）
+        run: |
+          cd "$SOURCE_DIR"
+          python3 scripts/renew_profiles.py --days 365
+
+      - name: 构建（release_arm64）
         run: |
           set -x
-
-          # source code paths are included in the final binary, so we need to make them stable across builds
-          SOURCE_DIR=/Users/Shared/telegram-ios
-
-          # use canonical bazel root
-          BAZEL_USER_ROOT="/private/var/tmp/_bazel_containerhost"
-
-          cd $SOURCE_DIR
-
-          BUILD_NUMBER_OFFSET="$(cat build_number_offset)"
-
-          export APP_VERSION=$(cat versions.json | python3 -c 'import json,sys;obj=json.load(sys.stdin);print(obj["app"]);')
-          export COMMIT_COUNT=$(git rev-list --count HEAD)
-          export COMMIT_COUNT="$(($COMMIT_COUNT+$BUILD_NUMBER_OFFSET))"
-          export BUILD_NUMBER="$COMMIT_COUNT"
-          echo "BUILD_NUMBER=$(echo $BUILD_NUMBER)" >> $GITHUB_ENV
-          echo "APP_VERSION=$(echo $APP_VERSION)" >> $GITHUB_ENV
-
-          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+          cd "$SOURCE_DIR"
+          OVERRIDE=""
+          if [ "${{ inputs.override_xcode }}" != "false" ]; then OVERRIDE="--overrideXcodeVersion"; fi
           python3 -u build-system/Make/Make.py \
-            --bazelUserRoot="$BAZEL_USER_ROOT" \
+            --bazelUserRoot="/private/var/tmp/_bazel_containerhost" \
+            $OVERRIDE \
             build \
             --configurationPath="build-system/appstore-configuration.json" \
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
-            --buildNumber="$BUILD_NUMBER"
+            --buildNumber="${{ steps.buildnum.outputs.BUILD_NUMBER }}"
 
-          # collect ipa
-          OUTPUT_PATH="build/artifacts"
-          rm -rf "$OUTPUT_PATH"
-          mkdir -p "$OUTPUT_PATH"
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
-            cp "$f" $OUTPUT_PATH/
-          done
+      - name: 收集产物
+        run: |
+          set -x
+          cd "$SOURCE_DIR"
+          mkdir -p build/artifacts
+          # 官方路径形如 bazel-out/applebin_ios-ios_arm64-opt-ST-*/bin/Telegram/Telegram.ipa
+          FOUND=$(find bazel-out -name 'Telegram.ipa' -path '*applebin_ios-ios_arm64*' | head -1)
+          if [ -z "$FOUND" ]; then
+            echo "::error::没找到 Telegram.ipa，列出 bazel-out 结构："
+            find bazel-out -maxdepth 2 -type d | head -50
+            exit 1
+          fi
+          cp "$FOUND" build/artifacts/Telegram.ipa
+          ls -lh build/artifacts/Telegram.ipa
+          # 顺手确认真的是 arm64 设备包而不是模拟器包
+          unzip -l build/artifacts/Telegram.ipa | head -20
 
-          # collect dsym
-          mkdir -p build/DSYMs
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/*.dSYM; do
-            cp -R "$f" build/DSYMs/
-          done
-          zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 发布为 Release asset（不占 artifact 额度）
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ env.BUILD_NUMBER }}
-          release_name: Telegram ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
+          tag_name: build-${{ steps.buildnum.outputs.BUILD_NUMBER }}
+          name: TGTranslate ${{ steps.buildnum.outputs.APP_VERSION }} (${{ steps.buildnum.outputs.BUILD_NUMBER }})
           body: |
-            An unsigned build of Telegram for iOS ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
-          draft: false
-          prerelease: false
+            未签名 IPA（TrollStore 直接安装）。
+            应用版本：${{ steps.buildnum.outputs.APP_VERSION }}
+            构建号：${{ steps.buildnum.outputs.BUILD_NUMBER }}
+            翻译通道：Google (gtx) / 百度（可选，需自备 APPID+密钥）
+          files: ${{ env.SOURCE_DIR }}/build/artifacts/Telegram.ipa
+          fail_on_unmatched_files: true
 
-      - name: Upload Release IPA
-        id: upload-release-ipa 
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 失败时上传日志
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
-          asset_name: Telegram.ipa
-          asset_content_type: application/zip
-
-      - name: Upload Release DSYM
-        id: upload-release-dsym 
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip
-          asset_name: Telegram.DSYMs.zip
-          asset_content_type: application/zip
+          name: build-logs
+          path: |
+            ${{ env.SOURCE_DIR }}/build/**/*.log
+          retention-days: 3
+          if-no-files-found: ignore

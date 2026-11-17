@@ -41,6 +41,7 @@ private enum LanguageListEntry: Comparable, Identifiable {
     case translateEntire(text: String, value: Bool, locked: Bool)
     case doNotTranslate(text: String, value: String)
     case translateInfo(text: String)
+    case tgtranslate(title: String, value: String)
     
     case localizationTitle(text: String, section: ItemListSectionId)
     case localization(index: Int, info: LocalizationInfo?, type: LanguageListEntryType, selected: Bool, activity: Bool, revealed: Bool, editing: Bool)
@@ -57,6 +58,8 @@ private enum LanguageListEntry: Comparable, Identifiable {
                 return .translate(3)
             case .translateInfo:
                 return .translate(4)
+            case .tgtranslate:
+                return .translate(5)
             case .localizationTitle:
                 return .localizationTitle
             case let .localization(index, info, _, _, _, _, _):
@@ -76,6 +79,8 @@ private enum LanguageListEntry: Comparable, Identifiable {
                 return 3
             case .translateInfo:
                 return 4
+            case .tgtranslate:
+                return 5
             case .localizationTitle:
                 return 1000
             case let .localization(index, _, _, _, _, _, _):
@@ -109,6 +114,10 @@ private enum LanguageListEntry: Comparable, Identifiable {
                 })
             case let .translateInfo(text):
                 return ItemListTextItem(presentationData: ItemListPresentationData(presentationData), text: .plain(text), sectionId: LanguageListSection.translate.rawValue)
+            case let .tgtranslate(title, value):
+                return ItemListDisclosureItem(presentationData: ItemListPresentationData(presentationData), systemStyle: .glass, title: title, label: value, sectionId: LanguageListSection.translate.rawValue, style: .blocks, action: {
+                    tgTranslatePresentSettings?()
+                })
             case let .localizationTitle(text, section):
                 return ItemListSectionHeaderItem(presentationData: ItemListPresentationData(presentationData), text: text, sectionId: section)
             case let .localization(_, info, type, selected, activity, revealed, editing):
@@ -535,6 +544,8 @@ final class LocalizationListControllerNode: ViewControllerTracingNode {
                     if chatTranslationAvailable {
                         entries.append(.translateEntire(text: presentationData.strings.Localization_TranslateEntireChat, value: translateChats, locked: !isPremium))
                     }
+                    entries.append(.tgtranslate(title: "翻译通道", value: tgTranslateSummary()))
+                    entries.append(.translateInfo(text: "点「翻译通道」可切换 Google/百度、开关收发自动翻译；代理与百度密钥写在 tgtranslate.json"))
                     
                     var value = ""
                     if ignoredLanguages.count > 1 {

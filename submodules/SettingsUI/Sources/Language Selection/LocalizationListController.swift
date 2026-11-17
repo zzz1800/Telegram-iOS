@@ -45,6 +45,46 @@ public class LocalizationListController: ViewController {
     
     private var previousContentOffset: ListViewVisibleContentOffset?
     
+    private func presentTGTranslateSettings() {
+        let presentationData = self.presentationData
+        let settings = TranslationProviderSettingsStore.shared.load()
+        let kindLabel = settings.kind.displayName
+        let proxyLabel = settings.googleProxy.isEmpty ? "未设置（写在 tgtranslate.json）" : settings.googleProxy
+        let keyLabel = settings.baiduKey.isEmpty ? "未设置（写在 tgtranslate.json）" : "已设置"
+        let incomingLabel = settings.translateIncoming ? "开" : "关"
+        let outgoingLabel = settings.translateOutgoing ? "开" : "关"
+        let controller = ActionSheetController(theme: presentationData.theme.actionSheet)
+        var groups: [ActionSheetItemGroup] = []
+        groups.append(ActionSheetItemGroup(items: [
+            ActionSheetButtonItem(title: "当前引擎：" + kindLabel + "（点击切换）", action: {
+                TranslationProviderSettingsStore.shared.update { current in
+                    current.kind = current.kind == .google ? .baidu : .google
+                }
+                controller.dismissAnimated()
+            }),
+        ]))
+        groups.append(ActionSheetItemGroup(items: [
+            ActionSheetSwitchItem(title: "接收消息自动翻译（" + incomingLabel + "）", isOn: settings.translateIncoming, action: { value in
+                TranslationProviderSettingsStore.shared.update { $0.translateIncoming = value }
+            }),
+            ActionSheetSwitchItem(title: "发送前自动翻译（" + outgoingLabel + "）", isOn: settings.translateOutgoing, action: { value in
+                TranslationProviderSettingsStore.shared.update { $0.translateOutgoing = value }
+            }),
+        ]))
+        groups.append(ActionSheetItemGroup(items: [
+            ActionSheetButtonItem(title: "目标语言：" + settings.targetLanguage, enabled: false, action: {}),
+            ActionSheetButtonItem(title: "代理：" + proxyLabel, enabled: false, action: {}),
+            ActionSheetButtonItem(title: "百度密钥：" + keyLabel, enabled: false, action: {}),
+        ]))
+        groups.append(ActionSheetItemGroup(items: [
+            ActionSheetButtonItem(title: "完成", action: {
+                controller.dismissAnimated()
+            }),
+        ]))
+        controller.setItemGroups(groups)
+        self.present(controller, in: .window(.root))
+    }
+    
     public init(context: AccountContext, focusOnItemTag: LocalizationListEntryTag? = nil) {
         self.context = context
         self.focusOnItemTag = focusOnItemTag
@@ -69,6 +109,10 @@ public class LocalizationListController: ViewController {
                 }
                 strongSelf.controllerNode.scrollToTop()
             }
+        }
+        
+        tgTranslatePresentSettings = { [weak self] in
+            self?.presentTGTranslateSettings()
         }
         
         self.presentationDataDisposable = (context.sharedContext.presentationData

@@ -343,7 +343,8 @@ public func chatTranslationState(context: AccountContext, peerId: EnginePeer.Id,
                             let isEnabled: Bool
                             if let currentIsEnabled = cached?.isEnabled {
                                 isEnabled = currentIsEnabled
-                            } else if autoTranslateEnabled {
+                            } else if autoTranslateEnabled || TranslationProviderSettingsStore.shared.load().translateIncoming {
+                                // TGTranslate: 本地开关也能开启整聊翻译，不再依赖服务端/会员标记
                                 isEnabled = true
                             } else {
                                 isEnabled = false

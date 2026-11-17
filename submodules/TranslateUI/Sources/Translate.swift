@@ -186,7 +186,9 @@ public func canTranslateChats(context: AccountContext) -> Bool {
     default:
         break
     }
-    return chatTranslationAvailable
+    // TGTranslate: 本地通道（Google/百度）已接管，不再要求服务端 translation.auto 或 iOS 18
+    _ = chatTranslationAvailable
+    return true
 }
 
 public func canTranslateText(context: AccountContext, text: String, showTranslate: Bool, showTranslateIfTopical: Bool = false, ignoredLanguages: [String]?) -> (canTranslate: Bool, language: String?) {
@@ -207,7 +209,9 @@ public func canTranslateText(context: AccountContext, text: String, showTranslat
         break
     }
     
-    let showTranslate = showTranslate && translateButtonAvailable
+    // TGTranslate: 跳过「按钮可用性」闸（原逻辑在 iOS 18 以下直接把翻译按钮关掉）
+    _ = translateButtonAvailable
+    let showTranslateEnabled = showTranslate
         
     if #available(iOS 12.0, *) {
         if context.sharedContext.immediateExperimentalUISettings.disableLanguageRecognition {
@@ -222,7 +226,7 @@ public func canTranslateText(context: AccountContext, text: String, showTranslat
         languageRecognizer.reset()
         
         var supportedTranslationLanguages = supportedTranslationLanguages
-        if !showTranslate && showTranslateIfTopical {
+        if !showTranslateEnabled && showTranslateIfTopical {
             supportedTranslationLanguages = ["uk", "ru"]
         }
                 

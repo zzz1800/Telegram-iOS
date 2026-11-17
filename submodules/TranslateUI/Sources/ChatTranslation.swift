@@ -195,8 +195,11 @@ public func translateMessageIds(context: AccountContext, messageIds: [EngineMess
         // 未配置任何通道时此值为 true 也无害：service 返回 nil，引擎自动回退官方 MTProto。
         // 注意：必须用 let —— 该 target 开了 -warnings-as-errors，"never mutated" 会直接中断编译。
         let enableLocalIfPossible = true
-        return context.engine.messages.translateMessages(messageIds: messageIdsToTranslate, fromLang: fromLang, toLang: toLang, enableLocalIfPossible: enableLocalIfPossible)
-        |> `catch` { _ -> Signal<Never, NoError> in
+        // TGTranslate: fromLang 为空时用 auto，否则本地通道整条被跳过（这正是"毫无反应"的原因之一）
+        let effectiveFromLang: String = fromLang ?? "auto"
+        return context.engine.messages.translateMessages(messageIds: messageIdsToTranslate, fromLang: effectiveFromLang, toLang: toLang, enableLocalIfPossible: enableLocalIfPossible)
+        |> `catch` { error -> Signal<Never, NoError> in
+            TranslationLog.log("incoming", "翻译失败: \(error)（from=\(effectiveFromLang) to=\(toLang) 条数=\(messageIdsToTranslate.count)）")
             return .complete()
         }
     } |> switchToLatest

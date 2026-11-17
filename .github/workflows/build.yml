@@ -123,6 +123,16 @@ jobs:
           cd "$SOURCE_DIR"
           python3 scripts/renew_profiles.py --days 365
 
+      - name: 恢复 Bazel 缓存（二次构建提速）
+        uses: actions/cache@v4
+        continue-on-error: true
+        with:
+          path: /Users/Shared/bazel-cache
+          key: bazel-${{ runner.os }}-${{ hashFiles('versions.json') }}-${{ github.run_id }}
+          restore-keys: |
+            bazel-${{ runner.os }}-${{ hashFiles('versions.json') }}-
+            bazel-${{ runner.os }}-
+
       - name: 构建（release_arm64）
         run: |
           set -x
@@ -136,6 +146,7 @@ jobs:
             --configurationPath="build-system/appstore-configuration.json" \
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
+            --cacheDir="/Users/Shared/bazel-cache" \
             --buildNumber="${{ steps.buildnum.outputs.BUILD_NUMBER }}"
 
       - name: 收集产物

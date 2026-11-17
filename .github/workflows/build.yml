@@ -12,8 +12,6 @@ on:
   push:
     branches: [ master ]
   # macOS 额度耗尽期间靠定时任务自动重抢：额度一恢复，任意一次就会跑完并自动发 Release
-  schedule:
-    - cron: "17 */2 * * *"
   workflow_dispatch:
     inputs:
       override_xcode:

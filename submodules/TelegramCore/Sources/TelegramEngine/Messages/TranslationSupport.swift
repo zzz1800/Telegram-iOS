@@ -438,13 +438,45 @@ public enum TranslationChunker {
 // MARK: - 日志（release 下静默，只留计数）
 
 public enum TranslationLog {
-    public static var enabled = false
+    /// release 也记录：写入 Documents/tgtranslate.log，「文件」App 里可直接取
+    public static var enabled = true
+
+    private static let logLock = NSLock()
+    private static let maxBytes: UInt64 = 512 * 1024
+
+    private static var logURL: URL? {
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return documents.appendingPathComponent("tgtranslate.log")
+    }
+
+    private static let logFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm:ss"
+        return formatter
+    }()
 
     public static func log(_ tag: String, _ message: String) {
+        let line = logFormatter.string(from: Date()) + " [" + tag + "] " + message + "\n"
         #if DEBUG
-        if enabled {
-            print("[\(tag)] \(message)")
-        }
+        print(line, terminator: "")
         #endif
+        guard enabled, let url = logURL else {
+            return
+        }
+        logLock.lock()
+        defer { logLock.unlock() }
+        let data = Data(line.utf8)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            let size = (try? handle.seekToEnd()) ?? 0
+            if size > maxBytes {
+                try? handle.truncate(atOffset: 0)
+            }
+            handle.write(data)
+        } else {
+            try? data.write(to: url)
+        }
     }
 }

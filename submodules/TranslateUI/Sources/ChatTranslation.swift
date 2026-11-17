@@ -228,7 +228,8 @@ public func chatTranslationState(context: AccountContext, peerId: EnginePeer.Id,
             context.engine.data.subscribe(TelegramEngine.EngineData.Item.Peer.AutoTranslateEnabled(id: peerId))
         )
         |> mapToSignal { settings, autoTranslateEnabled in
-            if !settings.translateChats && !autoTranslateEnabled {
+            if !settings.translateChats && !autoTranslateEnabled && !TranslationProviderSettingsStore.shared.load().translateIncoming {
+                // TGTranslate: 本地开关也能开启整聊翻译
                 return .single(nil)
             }
             

@@ -60,10 +60,14 @@ func translationOutboundTransform(
     }
 
     let signals: [Signal<String?, NoError>] = pending.map { item in
-        return MultiProviderTranslationService.shared.translateSingle(
-            text: item.text,
-            fromLang: "zh",
-            toLang: toLang
+        // 出站不能卡住发送：2 秒拿不到译文就按原文发出去
+        return translationWithDeadline(
+            MultiProviderTranslationService.shared.translateSingle(
+                text: item.text,
+                fromLang: "zh",
+                toLang: toLang
+            ),
+            seconds: 2.0
         )
     }
 
@@ -80,8 +84,12 @@ func translationOutboundTransform(
             }
         }
 
-        // 失败且用户选择「中止发送」：把这些消息从出站队列里摘掉
-        let dropFailures = !settings.sendOriginalOnOutgoingFailure
+        // 失败一律按原文发送（绝不因为翻译失败而丢掉用户的消息）
+        let dropFailures = false
+        if !failed.isEmpty {
+            TranslationLog.log("outbound", "翻译失败 \(failed.count)/\(pending.count) 条，按原文发送")
+        }
+        _ = settings.sendOriginalOnOutgoingFailure
 
         var output: [EnqueueMessage] = []
         output.reserveCapacity(messages.count)
@@ -101,6 +109,55 @@ func translationOutboundTransform(
             output.append(message)
         }
         return output
+    }
+}
+
+/// 给翻译信号加一个硬上限：超时按「无译文」处理，避免阻塞发送。
+private final class TranslationDeadlineFlag {
+    private let lock = NSLock()
+    private var done = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if done {
+            return false
+        }
+        done = true
+        return true
+    }
+}
+
+private func translationWithDeadline(_ signal: Signal<String?, NoError>, seconds: Double) -> Signal<String?, NoError> {
+    return Signal { subscriber in
+        let flag = TranslationDeadlineFlag()
+        let inner = signal.start(next: { value in
+            if flag.claim() {
+                subscriber.putNext(value)
+                subscriber.putCompletion()
+            }
+        }, error: { _ in
+            if flag.claim() {
+                subscriber.putNext(nil)
+                subscriber.putCompletion()
+            }
+        }, completed: {
+            if flag.claim() {
+                subscriber.putNext(nil)
+                subscriber.putCompletion()
+            }
+        })
+        let work = DispatchWorkItem {
+            if flag.claim() {
+                subscriber.putNext(nil)
+                subscriber.putCompletion()
+            }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: work)
+        return ActionDisposable {
+            work.cancel()
+            inner.dispose()
+        }
     }
 }
 

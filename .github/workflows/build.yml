@@ -142,22 +142,47 @@ jobs:
           set -x
           cd "$SOURCE_DIR"
           mkdir -p build/artifacts
-          # 官方路径形如 bazel-out/applebin_ios-ios_arm64-opt-ST-*/bin/Telegram/Telegram.ipa
-          # 不同版本的输出目录名不同：
-          #   13.x: bazel-out/applebin_ios-ios_arm64-opt-ST-*/bin/Telegram/Telegram.ipa
-          #   12.x: bazel-out/ios_arm64-opt-ios-arm64-min13.0-ST-*/bin/Telegram/Telegram.ipa
-          # 所以不要按目录名过滤，直接按文件名找。
-          FOUND=$(find bazel-out -name 'Telegram.ipa' -type f | head -1)
+          BAZEL_ROOT="/private/var/tmp/_bazel_containerhost"
+
+          # 说明：Bazel 把产物放在 --bazelUserRoot 的 output base 里，
+          # 源码目录下通常没有 bazel-out/bazel-bin 链接（本机实测 find bazel-out 为空）。
+          FOUND=""
+          if [ -f bazel-bin/Telegram/Telegram.ipa ]; then
+            FOUND="bazel-bin/Telegram/Telegram.ipa"
+          fi
           if [ -z "$FOUND" ]; then
-            echo "::error::没找到 Telegram.ipa，列出 bazel-out 结构："
-            find bazel-out -maxdepth 2 -type d | head -50
+            FOUND=$(find -L "$BAZEL_ROOT" -name 'Telegram.ipa' -type f 2>/dev/null | head -1)
+          fi
+          if [ -z "$FOUND" ]; then
+            FOUND=$(find -L . -name 'Telegram.ipa' -type f 2>/dev/null | head -1)
+          fi
+
+          # 兜底：没有 .ipa 就自己把 .app 打成 ipa
+          if [ -z "$FOUND" ]; then
+            echo "::warning::没找到 .ipa，尝试用 Telegram.app 自打包"
+            APP=$(find -L "$BAZEL_ROOT" -name 'Telegram.app' -type d 2>/dev/null | head -1)
+            if [ -n "$APP" ]; then
+              rm -rf /tmp/ipastage && mkdir -p /tmp/ipastage/Payload
+              cp -R "$APP" /tmp/ipastage/Payload/
+              (cd /tmp/ipastage && zip -qry "$SOURCE_DIR/build/artifacts/Telegram.ipa" Payload)
+              FOUND="$SOURCE_DIR/build/artifacts/Telegram.ipa"
+            fi
+          fi
+
+          if [ -z "$FOUND" ]; then
+            echo "::error::既没有 Telegram.ipa 也没有 Telegram.app"
+            ls -la "$BAZEL_ROOT" 2>/dev/null | head -20
+            find -L "$BAZEL_ROOT" -maxdepth 4 -type d -name 'bazel-out' 2>/dev/null | head -5
             exit 1
           fi
-          cp "$FOUND" build/artifacts/Telegram.ipa
+
+          echo "found: $FOUND"
+          ls -lh "$FOUND"
+          if [ "$FOUND" != "$SOURCE_DIR/build/artifacts/Telegram.ipa" ]; then
+            cp "$FOUND" build/artifacts/Telegram.ipa
+          fi
           ls -lh build/artifacts/Telegram.ipa
-          # 顺手确认真的是 arm64 设备包而不是模拟器包
           unzip -l build/artifacts/Telegram.ipa | head -20
-          file "$FOUND" || true
 
       - name: 发布为 Release asset（不占 artifact 额度）
         uses: softprops/action-gh-release@v2

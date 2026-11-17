@@ -142,11 +142,11 @@ jobs:
           python3 -u build-system/Make/Make.py \
             --bazelUserRoot="/private/var/tmp/_bazel_containerhost" \
             $OVERRIDE \
+            --cacheDir="/Users/Shared/bazel-cache" \
             build \
             --configurationPath="build-system/appstore-configuration.json" \
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
-            --cacheDir="/Users/Shared/bazel-cache" \
             --buildNumber="${{ steps.buildnum.outputs.BUILD_NUMBER }}"
 
       - name: 收集产物

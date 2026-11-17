@@ -94,15 +94,32 @@ public final class TranslationProviderSettingsStore {
             // 密钥只从 Keychain 读，绝不落 UserDefaults
             s.baiduKey = TranslationKeychain.get(account: "baiduKey") ?? s.baiduKey
         }
-        // 配置文件优先：Documents/tgtranslate.json（见 docs/配置说明.md）
-        TranslationConfigFile.apply(to: &s)
+        // 优先级：界面里改过的值 > 配置文件 > 内置默认
+        // 之前是配置文件覆盖一切，导致「面板里点了切换却毫无变化」。
+        if !self.userOverride, TranslationConfigFile.applyToSettings(&s) {
+            // 已由配置文件填充
+        }
         return s
+    }
+
+    /// 用户是否在 App 内改过设置。改过之后配置文件不再覆盖界面。
+    public var userOverride: Bool {
+        return self.defaults.object(forKey: self.prefix + "userOverride") as? Bool ?? false
+    }
+
+    /// 恢复「以配置文件为准」
+    public func clearUserOverride() {
+        self.queue.sync {
+            self.defaults.removeObject(forKey: self.prefix + "userOverride")
+        }
     }
 
     public func update(_ mutate: (inout TranslationProviderSettings) -> Void) {
         var s = load()
         mutate(&s)
         queue.sync {
+            // 一旦在界面里改过，就不再让 tgtranslate.json 覆盖界面值
+            defaults.set(true, forKey: prefix + "userOverride")
             defaults.set(s.kind.rawValue, forKey: prefix + "kind")
             defaults.set(s.googleProxy, forKey: prefix + "googleProxy")
             defaults.set(s.baiduAppId, forKey: prefix + "baiduAppId")

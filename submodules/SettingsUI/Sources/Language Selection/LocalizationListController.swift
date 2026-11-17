@@ -53,7 +53,7 @@ public class LocalizationListController: ViewController {
         let keyLabel = settings.baiduKey.isEmpty ? "未设置（写在 tgtranslate.json）" : "已设置"
         let incomingLabel = settings.translateIncoming ? "开" : "关"
         let outgoingLabel = settings.translateOutgoing ? "开" : "关"
-        let controller = ActionSheetController(theme: presentationData.theme.actionSheet)
+        let controller = ActionSheetController(theme: ActionSheetControllerTheme(presentationData: presentationData))
         var groups: [ActionSheetItemGroup] = []
         groups.append(ActionSheetItemGroup(items: [
             ActionSheetButtonItem(title: "当前引擎：" + kindLabel + "（点击切换）", action: {

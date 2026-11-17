@@ -193,7 +193,8 @@ public func translateMessageIds(context: AccountContext, messageIds: [EngineMess
         
         // TGTranslate: 本地通道（Google / 百度）优先，不再依赖服务端 translation.auto 与 iOS 18。
         // 未配置任何通道时此值为 true 也无害：service 返回 nil，引擎自动回退官方 MTProto。
-        var enableLocalIfPossible = true
+        // 注意：必须用 let —— 该 target 开了 -warnings-as-errors，"never mutated" 会直接中断编译。
+        let enableLocalIfPossible = true
         return context.engine.messages.translateMessages(messageIds: messageIdsToTranslate, fromLang: fromLang, toLang: toLang, enableLocalIfPossible: enableLocalIfPossible)
         |> `catch` { _ -> Signal<Never, NoError> in
             return .complete()

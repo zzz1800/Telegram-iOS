@@ -403,7 +403,26 @@ private func _internal_translateMessagesByPeerId(account: Account, peerId: Engin
                     |> castError(TranslationError.self)
                     |> mapToSignal { resultTexts -> Signal<Api.messages.TranslatedText?, TranslationError> in
                         guard let resultTexts else {
-                            return .fail(.generic)
+                            // TGTranslate: 本地通道（Google/百度）无结果时回退官方服务器翻译，
+                            // 保证「至少还能翻」，而不是静默失败。
+                            TranslationLog.log("translate", "本地通道无结果，回退官方服务器 (to=\(toLang))")
+                            return account.network.request(Api.functions.messages.translateText(flags: flags, peer: inputPeer, id: id, text: nil, toLang: toLang, tone: tone != .neutral ? tone.rawValue : nil))
+                            |> map(Optional.init)
+                            |> mapError { error -> TranslationError in
+                                if error.errorDescription.hasPrefix("FLOOD_WAIT") {
+                                    return .limitExceeded
+                                } else if error.errorDescription == "MSG_ID_INVALID" {
+                                    return .invalidMessageId
+                                } else if error.errorDescription == "INPUT_TEXT_EMPTY" {
+                                    return .textIsEmpty
+                                } else if error.errorDescription == "INPUT_TEXT_TOO_LONG" {
+                                    return .textTooLong
+                                } else if error.errorDescription == "TO_LANG_INVALID" {
+                                    return .invalidLanguage
+                                } else {
+                                    return .generic
+                                }
+                            }
                         }
                         var result: [Api.TextWithEntities] = []
                         for messageId in plainMessageIds {

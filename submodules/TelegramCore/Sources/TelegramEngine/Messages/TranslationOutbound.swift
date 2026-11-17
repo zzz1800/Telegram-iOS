@@ -131,14 +131,10 @@ private final class TranslationDeadlineFlag {
 private func translationWithDeadline(_ signal: Signal<String?, NoError>, seconds: Double) -> Signal<String?, NoError> {
     return Signal { subscriber in
         let flag = TranslationDeadlineFlag()
+        // 入参是 Signal<String?, NoError>：error 回调永远不会触发，写了就是 dead code（-warnings-as-errors 会直接报错）
         let inner = signal.start(next: { value in
             if flag.claim() {
                 subscriber.putNext(value)
-                subscriber.putCompletion()
-            }
-        }, error: { _ in
-            if flag.claim() {
-                subscriber.putNext(nil)
                 subscriber.putCompletion()
             }
         }, completed: {

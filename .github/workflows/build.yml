@@ -14,6 +14,10 @@ on:
   # macOS 额度耗尽期间靠定时任务自动重抢：额度一恢复，任意一次就会跑完并自动发 Release
   workflow_dispatch:
     inputs:
+      runner:
+        description: "runner 标签（macos-15 / macos-14 / macos-26）"
+        type: string
+        default: "macos-15"
       override_xcode:
         description: "忽略 versions.json 的 Xcode 版本要求"
         type: boolean

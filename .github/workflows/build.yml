@@ -25,6 +25,9 @@ on:
         type: string
         default: "macos-15"
 
+permissions:
+  contents: write   # 创建 Release / 上传资产必需
+
 env:
   # 注意：runs-on 不接受 env 上下文（GitHub 会报 Unrecognized named-value: 'env'），
   # 所以 runner 标签必须写字面量，见下面 jobs.build.runs-on。
@@ -183,6 +186,14 @@ jobs:
           fi
           ls -lh build/artifacts/Telegram.ipa
           unzip -l build/artifacts/Telegram.ipa | head -20
+
+      - name: 上传 IPA 为构建产物（兜底，便于 API 下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram.ipa
+          path: ${{ env.SOURCE_DIR }}/build/artifacts/Telegram.ipa
+          retention-days: 7
+          if-no-files-found: error
 
       - name: 发布为 Release asset（不占 artifact 额度）
         uses: softprops/action-gh-release@v2

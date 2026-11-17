@@ -96,8 +96,9 @@ public final class TranslationProviderSettingsStore {
         }
         // 优先级：界面里改过的值 > 配置文件 > 内置默认
         // 之前是配置文件覆盖一切，导致「面板里点了切换却毫无变化」。
-        if !self.userOverride, TranslationConfigFile.applyToSettings(&s) {
-            // 已由配置文件填充
+        if !self.userOverride {
+            // 配置文件只在「面板没被改过」时生效（apply(to:) 返回 Void，不能当条件用）
+            TranslationConfigFile.apply(to: &s)
         }
         return s
     }
@@ -468,12 +469,14 @@ public enum TranslationLog {
         logLock.lock()
         defer { logLock.unlock() }
         let data = Data(line.utf8)
+        // 用 FileManager 取大小：FileHandle.seekToEnd() 要 iOS 13.4+，本 target 部署版本更低
+        let size = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.intValue ?? 0
+        if size > maxBytes {
+            // 超限就轮转：删掉，下一次写入重新建文件
+            try? FileManager.default.removeItem(at: url)
+        }
         if let handle = try? FileHandle(forWritingTo: url) {
             defer { try? handle.close() }
-            let size = (try? handle.seekToEnd()) ?? 0
-            if size > maxBytes {
-                try? handle.truncate(atOffset: 0)
-            }
             handle.write(data)
         } else {
             try? data.write(to: url)

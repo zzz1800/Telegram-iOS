@@ -50,6 +50,33 @@ public enum TranslationLanguage {
         }
     }
 
+    /// 是否中文（简体/繁体/粤语都算）。
+    /// 出站以前写的是 `canonical(toLang) != "zh"`，而 canonical("zh") 返回 "zh-CN" —— 那条守卫永远为真。
+    public static func isChinese(_ raw: String) -> Bool {
+        switch canonical(raw) {
+        case "zh-CN", "zh-TW", "zh-yue":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Telegram 官方 messages.translateText 用的语言码。
+    /// 官方不认 zh-Hans / zh-CN（真机复现 TO_LANG_INVALID，只有下拉框重选给的 "zh" 才成功），
+    /// 所以出站不能把 canonical() 直接透给官方，必须过这一层。
+    public static func officialCode(_ raw: String) -> String {
+        switch canonical(raw) {
+        case "zh-CN":
+            return "zh"
+        case "zh-TW":
+            return "zh-hant"
+        case "zh-yue":
+            return "yue"
+        default:
+            return canonical(raw)
+        }
+    }
+
     /// 百度代码；返回 nil 表示百度不支持该语种，调用方应回退 Google
     public static func baiduCode(_ raw: String) -> String? {
         switch canonical(raw) {

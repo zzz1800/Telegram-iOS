@@ -11,6 +11,7 @@ import ItemListUI
 
 // TGTranslate: 面板里循环切换用的取值表（只用 ActionSheet 现有组件，不引入新 UI）
 private let tgTranslateTargetLanguageCycle: [String] = ["zh", "en", "ja", "ko", "fr", "ru", "es"]
+private let tgTranslateOutgoingTargetCycle: [String] = ["en", "ja", "ko", "ru", "fr", "es", "zh"]
 private let tgTranslateProxyCycle: [String] = ["", "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"]
 
 private func tgTranslateNextInCycle(_ list: [String], current: String) -> String {
@@ -88,6 +89,14 @@ public class LocalizationListController: ViewController {
             ActionSheetButtonItem(title: "目标语言：" + settings.targetLanguage + "（点击切换）", action: { [weak self] in
                 TranslationProviderSettingsStore.shared.update { current in
                     current.targetLanguage = tgTranslateNextInCycle(tgTranslateTargetLanguageCycle, current: current.targetLanguage)
+                }
+                controller.dismissAnimated()
+                self?.reloadTGTranslateSettings()
+            }),
+            // 出站目标语言独立于「目标语言」：收外语翻 zh、打中文翻 en 才能同时成立
+            ActionSheetButtonItem(title: "发送目标语言：" + settings.outgoingTargetLanguage + "（点击切换）", action: { [weak self] in
+                TranslationProviderSettingsStore.shared.update { current in
+                    current.outgoingTargetLanguage = tgTranslateNextInCycle(tgTranslateOutgoingTargetCycle, current: current.outgoingTargetLanguage)
                 }
                 controller.dismissAnimated()
                 self?.reloadTGTranslateSettings()

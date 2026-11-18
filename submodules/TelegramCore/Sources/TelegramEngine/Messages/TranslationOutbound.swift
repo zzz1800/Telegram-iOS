@@ -28,15 +28,24 @@ func translationOutboundTransform(
     messages: [EnqueueMessage]
 ) -> Signal<[EnqueueMessage], NoError> {
     let settings = TranslationProviderSettingsStore.shared.load()
-    guard settings.translateOutgoing, !messages.isEmpty else {
+    guard !messages.isEmpty else {
+        return .single(messages)
+    }
+    guard settings.translateOutgoing else {
+        // TGTranslate: 以前这里静默 return，日志里什么都没有，被误判成「翻译链路坏了」。
+        // 现在每道闸都留一行，30 行日志就能定位卡在哪。
+        TranslationLog.log("outbound", "跳过：发送前自动翻译=关")
         return .single(messages)
     }
 
-    let toLang = settings.targetLanguage
-    guard TranslationLanguage.canonical(toLang) != "zh" else {
-        // 目标语言是中文，而输入本来就是中文，没有翻译的必要
+    // 出站目标语言与入站目标语言是两件事：入站要 zh、出站要 en，共用一个字段只能活一个方向
+    let outgoingRaw = settings.outgoingTargetLanguage
+    guard !TranslationLanguage.isChinese(outgoingRaw) else {
+        TranslationLog.log("outbound", "跳过：发送目标语言是中文 (\(outgoingRaw))")
         return .single(messages)
     }
+    let officialToLang = TranslationLanguage.officialCode(outgoingRaw)
+    let localToLang = TranslationLanguage.canonical(outgoingRaw)
 
     var pending: [(index: Int, text: String)] = []
     for (index, message) in messages.enumerated() {
@@ -56,36 +65,55 @@ func translationOutboundTransform(
     }
 
     guard !pending.isEmpty else {
+        TranslationLog.log("outbound", "跳过：没有中文纯文本 (共 \(messages.count) 条)")
         return .single(messages)
     }
+    TranslationLog.log("outbound", "官方优先发起 \(pending.count) 条 (to=\(officialToLang))")
 
     let signals: [Signal<String?, NoError>] = pending.map { item in
-        // TGTranslate: 出站原来只走本地通道（Google/百度）。国内直连 Google 不通 = 永远发原文
-        // （真机日志：`[outbound] 翻译失败 0/1 条，按原文发送`）。现在本地失败就回退官方翻译。
-        let localFirst = MultiProviderTranslationService.shared.translateSingle(
+        // TGTranslate: 出站改「官方优先，本地兜底」。
+        // 为什么翻过来：本地通道是 Google，国内直连是**挂住**不是快速失败（URLSession 15s/30s），
+        // 而上一版给整条链只留 5 秒硬截止 → 到点就按原文发送，官方回退一次都没机会发起
+        // （真机日志只有「翻译失败 0/1 条，按原文发送」）。官方 messages.translateText 这个账号可用
+        // （入站三条路就靠它），所以出站也先打官方。
+        let official = _internal_translateOfficial(
+            network: account.network,
             text: item.text,
-            fromLang: "zh",
-            toLang: toLang
+            toLang: officialToLang
         )
-        |> mapToSignal { value -> Signal<String?, NoError> in
-            if let value, !value.isEmpty {
-                return .single(value)
+        |> map { result -> String? in
+            if let translated = result?.0, !translated.isEmpty {
+                return translated
             }
-            TranslationLog.log("outbound", "本地通道无结果，回退官方 (to=\(toLang))")
-            return _internal_translateOfficial(network: account.network, text: item.text, toLang: toLang)
-            |> map { result -> String? in
-                if let translated = result?.0, !translated.isEmpty {
-                    TranslationLog.log("outbound", "官方回退成功")
-                    return translated
+            return nil
+        }
+        |> `catch` { error -> Signal<String?, NoError> in
+            TranslationLog.log("outbound", "官方失败 \(error)")
+            return .single(nil)
+        }
+
+        let chain = translationWithDeadline(official, seconds: 4.0)
+        |> mapToSignal { officialValue -> Signal<String?, NoError> in
+            if let officialValue, !officialValue.isEmpty {
+                TranslationLog.log("outbound", "官方成功")
+                return .single(officialValue)
+            }
+            TranslationLog.log("outbound", "官方无结果，本地兜底 (to=\(localToLang))")
+            return MultiProviderTranslationService.shared.translateSingle(
+                text: item.text,
+                fromLang: "zh",
+                toLang: localToLang
+            )
+            |> map { localValue -> String? in
+                if let localValue, !localValue.isEmpty {
+                    TranslationLog.log("outbound", "本地兜底成功")
+                    return localValue
                 }
                 return nil
             }
-            |> `catch` { _ -> Signal<String?, NoError> in
-                return .single(nil)
-            }
         }
-        // 出站仍然不能卡住发送：本地 2 秒 + 官方一次往返，合计最多 5 秒
-        return translationWithDeadline(localFirst, seconds: 5.0)
+        // 出站不能卡住发送：官方 4 秒 + 本地兜底，整体最多 10 秒，再不行按原文发送（绝不丢消息）
+        return translationWithDeadline(chain, seconds: 10.0)
     }
 
     return combineLatest(signals)

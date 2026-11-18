@@ -33,6 +33,7 @@ public struct TranslationProviderSettings {
         baiduAppId: "",
         baiduKey: "",
         targetLanguage: "zh",
+        outgoingTargetLanguage: "en",
         translateIncoming: true,
         translateOutgoing: false,
         sendOriginalOnOutgoingFailure: true,
@@ -49,6 +50,9 @@ public struct TranslationProviderSettings {
     public var baiduAppId: String
     public var baiduKey: String
     public var targetLanguage: String
+    /// 发送前翻译的目标语言，独立于收信目标语言：
+    /// 收外语要翻成 zh、打中文要翻成 en，共用一个字段必然互相打架
+    public var outgoingTargetLanguage: String
     /// 收到外语消息自动翻译
     public var translateIncoming: Bool
     /// 发送前把中文自动翻成目标语言
@@ -84,6 +88,7 @@ public final class TranslationProviderSettingsStore {
             s.googleProxy = defaults.string(forKey: prefix + "googleProxy") ?? s.googleProxy
             s.baiduAppId = defaults.string(forKey: prefix + "baiduAppId") ?? s.baiduAppId
             s.targetLanguage = defaults.string(forKey: prefix + "targetLanguage") ?? s.targetLanguage
+            s.outgoingTargetLanguage = defaults.string(forKey: prefix + "outgoingTargetLanguage") ?? s.outgoingTargetLanguage
             s.translateIncoming = defaults.object(forKey: prefix + "translateIncoming") as? Bool ?? s.translateIncoming
             s.translateOutgoing = defaults.object(forKey: prefix + "translateOutgoing") as? Bool ?? s.translateOutgoing
             s.sendOriginalOnOutgoingFailure = defaults.object(forKey: prefix + "sendOriginalOnFailure") as? Bool ?? s.sendOriginalOnOutgoingFailure
@@ -112,6 +117,7 @@ public final class TranslationProviderSettingsStore {
     public func clearUserOverride() {
         self.queue.sync {
             let keys = ["userOverride", "kind", "googleProxy", "baiduAppId", "targetLanguage",
+                        "outgoingTargetLanguage",
                         "translateIncoming", "translateOutgoing", "sendOriginalOnFailure",
                         "googleChunk", "baiduChunkBytes", "baiduInterval", "googleConcurrency"]
             for key in keys {
@@ -130,6 +136,7 @@ public final class TranslationProviderSettingsStore {
             defaults.set(s.googleProxy, forKey: prefix + "googleProxy")
             defaults.set(s.baiduAppId, forKey: prefix + "baiduAppId")
             defaults.set(s.targetLanguage, forKey: prefix + "targetLanguage")
+            defaults.set(s.outgoingTargetLanguage, forKey: prefix + "outgoingTargetLanguage")
             defaults.set(s.translateIncoming, forKey: prefix + "translateIncoming")
             defaults.set(s.translateOutgoing, forKey: prefix + "translateOutgoing")
             defaults.set(s.sendOriginalOnOutgoingFailure, forKey: prefix + "sendOriginalOnFailure")

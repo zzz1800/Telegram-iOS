@@ -46,7 +46,7 @@ func _internal_translate(network: Network, text: String, toLang: String, entitie
     return _internal_translateOfficial(network: network, text: text, toLang: toLang, entities: entities, tone: tone, peer: peer, messageId: messageId)
 }
 
-private func _internal_translateOfficial(network: Network, text: String, toLang: String, entities: [MessageTextEntity] = [], tone: TranslationTone = .neutral, peer: Api.InputPeer? = nil, messageId: Int32? = nil) -> Signal<(String, [MessageTextEntity])?, TranslationError> {
+func _internal_translateOfficial(network: Network, text: String, toLang: String, entities: [MessageTextEntity] = [], tone: TranslationTone = .neutral, peer: Api.InputPeer? = nil, messageId: Int32? = nil) -> Signal<(String, [MessageTextEntity])?, TranslationError> {
     var flags: Int32 = 0
 
     if tone != .neutral {

@@ -60,15 +60,32 @@ func translationOutboundTransform(
     }
 
     let signals: [Signal<String?, NoError>] = pending.map { item in
-        // 出站不能卡住发送：2 秒拿不到译文就按原文发出去
-        return translationWithDeadline(
-            MultiProviderTranslationService.shared.translateSingle(
-                text: item.text,
-                fromLang: "zh",
-                toLang: toLang
-            ),
-            seconds: 2.0
+        // TGTranslate: 出站原来只走本地通道（Google/百度）。国内直连 Google 不通 = 永远发原文
+        // （真机日志：`[outbound] 翻译失败 0/1 条，按原文发送`）。现在本地失败就回退官方翻译。
+        let localFirst = MultiProviderTranslationService.shared.translateSingle(
+            text: item.text,
+            fromLang: "zh",
+            toLang: toLang
         )
+        |> mapToSignal { value -> Signal<String?, NoError> in
+            if let value, !value.isEmpty {
+                return .single(value)
+            }
+            TranslationLog.log("outbound", "本地通道无结果，回退官方 (to=\(toLang))")
+            return _internal_translateOfficial(network: account.network, text: item.text, toLang: toLang)
+            |> map { result -> String? in
+                if let translated = result?.0, !translated.isEmpty {
+                    TranslationLog.log("outbound", "官方回退成功")
+                    return translated
+                }
+                return nil
+            }
+            |> `catch` { _ -> Signal<String?, NoError> in
+                return .single(nil)
+            }
+        }
+        // 出站仍然不能卡住发送：本地 2 秒 + 官方一次往返，合计最多 5 秒
+        return translationWithDeadline(localFirst, seconds: 5.0)
     }
 
     return combineLatest(signals)

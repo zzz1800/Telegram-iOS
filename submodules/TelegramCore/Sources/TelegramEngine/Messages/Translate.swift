@@ -30,16 +30,23 @@ public enum TranslationTone: String {
 }
 
 func _internal_translate(network: Network, text: String, toLang: String, entities: [MessageTextEntity] = [], tone: TranslationTone = .neutral, peer: Api.InputPeer? = nil, messageId: Int32? = nil) -> Signal<(String, [MessageTextEntity])?, TranslationError> {
+    // TGTranslate: 本地通道（Google/百度）优先，无结果再回退官方服务器。
+    // 之前这里只 `return nil`，UI 会把原文当译文显示（翻译面板「到 中文」里还是英文就是这个原因）。
     if let service = engineExperimentalInternalTranslationService {
         return service.translate(texts: [AnyHashable(0): text], fromLang: "auto", toLang: toLang)
-        |> map { result -> (String, [MessageTextEntity])? in
-            guard let translated = result?[AnyHashable(0)] else {
-                return nil
-            }
-            return (translated, [])
-        }
         |> castError(TranslationError.self)
+        |> mapToSignal { result -> Signal<(String, [MessageTextEntity])?, TranslationError> in
+            guard let translated = result?[AnyHashable(0)], !translated.isEmpty else {
+                TranslationLog.log("translate", "本地通道无结果，回退官方服务器 (单条 to=\(toLang))")
+                return _internal_translateOfficial(network: network, text: text, toLang: toLang, entities: entities, tone: tone, peer: peer, messageId: messageId)
+            }
+            return .single((translated, []))
+        }
     }
+    return _internal_translateOfficial(network: network, text: text, toLang: toLang, entities: entities, tone: tone, peer: peer, messageId: messageId)
+}
+
+private func _internal_translateOfficial(network: Network, text: String, toLang: String, entities: [MessageTextEntity] = [], tone: TranslationTone = .neutral, peer: Api.InputPeer? = nil, messageId: Int32? = nil) -> Signal<(String, [MessageTextEntity])?, TranslationError> {
     var flags: Int32 = 0
 
     if tone != .neutral {

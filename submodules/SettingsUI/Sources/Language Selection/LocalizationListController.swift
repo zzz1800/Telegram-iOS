@@ -9,6 +9,17 @@ import AccountContext
 import SearchUI
 import ItemListUI
 
+// TGTranslate: 面板里循环切换用的取值表（只用 ActionSheet 现有组件，不引入新 UI）
+private let tgTranslateTargetLanguageCycle: [String] = ["zh", "en", "ja", "ko", "fr", "ru", "es"]
+private let tgTranslateProxyCycle: [String] = ["", "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"]
+
+private func tgTranslateNextInCycle(_ list: [String], current: String) -> String {
+    if let index = list.firstIndex(of: current), index + 1 < list.count {
+        return list[index + 1]
+    }
+    return list.first ?? ""
+}
+
 public enum LocalizationListEntryTag: ItemListItemTag, Equatable {
     case showButton
     case translateChats
@@ -49,8 +60,8 @@ public class LocalizationListController: ViewController {
         let presentationData = self.presentationData
         let settings = TranslationProviderSettingsStore.shared.load()
         let kindLabel = settings.kind.displayName
-        let proxyLabel = settings.googleProxy.isEmpty ? "未设置（写在 tgtranslate.json）" : settings.googleProxy
-        let keyLabel = settings.baiduKey.isEmpty ? "未设置（写在 tgtranslate.json）" : "已设置"
+        let proxyLabel = settings.googleProxy.isEmpty ? "未设置（点一下循环切换）" : settings.googleProxy
+        let keyLabel = settings.baiduKey.isEmpty ? "未设置" : "已设置"
         let incomingLabel = settings.translateIncoming ? "开" : "关"
         let outgoingLabel = settings.translateOutgoing ? "开" : "关"
         let controller = ActionSheetController(theme: ActionSheetControllerTheme(presentationData: presentationData))
@@ -72,9 +83,37 @@ public class LocalizationListController: ViewController {
             }),
         ]))
         groups.append(ActionSheetItemGroup(items: [
-            ActionSheetButtonItem(title: "目标语言：" + settings.targetLanguage, enabled: false, action: {}),
-            ActionSheetButtonItem(title: "代理：" + proxyLabel, enabled: false, action: {}),
-            ActionSheetButtonItem(title: "百度密钥：" + keyLabel, enabled: false, action: {}),
+            // TGTranslate: 这三行原来是 enabled: false 的只读标签，导致「点过一次切换后目标语言
+            // 被冻成 json 里的值且再也改不回来」。现在都可点，点完自动关闭再弹一次以刷新显示。
+            ActionSheetButtonItem(title: "目标语言：" + settings.targetLanguage + "（点击切换）", action: { [weak self] in
+                TranslationProviderSettingsStore.shared.update { current in
+                    current.targetLanguage = tgTranslateNextInCycle(tgTranslateTargetLanguageCycle, current: current.targetLanguage)
+                }
+                controller.dismissAnimated()
+                self?.reloadTGTranslateSettings()
+            }),
+            ActionSheetButtonItem(title: "代理：" + proxyLabel, action: { [weak self] in
+                TranslationProviderSettingsStore.shared.update { current in
+                    current.googleProxy = tgTranslateNextInCycle(tgTranslateProxyCycle, current: current.googleProxy)
+                }
+                controller.dismissAnimated()
+                self?.reloadTGTranslateSettings()
+            }),
+            ActionSheetButtonItem(title: "百度密钥：" + keyLabel + "（点击清除）", action: { [weak self] in
+                TranslationProviderSettingsStore.shared.update { current in
+                    current.baiduKey = ""
+                    current.baiduAppId = ""
+                }
+                controller.dismissAnimated()
+                self?.reloadTGTranslateSettings()
+            }),
+        ]))
+        groups.append(ActionSheetItemGroup(items: [
+            ActionSheetButtonItem(title: "恢复以配置文件为准（清空界面设置）", action: { [weak self] in
+                TranslationProviderSettingsStore.shared.clearUserOverride()
+                controller.dismissAnimated()
+                self?.reloadTGTranslateSettings()
+            }),
         ]))
         groups.append(ActionSheetItemGroup(items: [
             ActionSheetButtonItem(title: "完成", action: {
@@ -83,6 +122,12 @@ public class LocalizationListController: ViewController {
         ]))
         controller.setItemGroups(groups)
         self.present(controller, in: .window(.root))
+    }
+
+    private func reloadTGTranslateSettings() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.presentTGTranslateSettings()
+        }
     }
     
     public init(context: AccountContext, focusOnItemTag: LocalizationListEntryTag? = nil) {

@@ -108,10 +108,15 @@ public final class TranslationProviderSettingsStore {
         return self.defaults.object(forKey: self.prefix + "userOverride") as? Bool ?? false
     }
 
-    /// 恢复「以配置文件为准」
+    /// 恢复「以配置文件为准」：连各字段一起清，回到内置默认 / 配置文件的值
     public func clearUserOverride() {
         self.queue.sync {
-            self.defaults.removeObject(forKey: self.prefix + "userOverride")
+            let keys = ["userOverride", "kind", "googleProxy", "baiduAppId", "targetLanguage",
+                        "translateIncoming", "translateOutgoing", "sendOriginalOnFailure",
+                        "googleChunk", "baiduChunkBytes", "baiduInterval", "googleConcurrency"]
+            for key in keys {
+                self.defaults.removeObject(forKey: self.prefix + key)
+            }
         }
     }
 

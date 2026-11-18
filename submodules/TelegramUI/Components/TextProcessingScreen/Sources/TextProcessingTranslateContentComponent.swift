@@ -393,7 +393,9 @@ final class TextProcessingTranslateContentComponent: Component {
                     toLanguage = normalizeTranslationLanguage(toLanguage)
                     TranslationLog.log("translate", "首帧请求 to=\(toLanguage) from=\(fromLanguage)")
                     component.externalState.result = (toLanguage, nil, [])
-                    self.beginTranslationIfNecessary(reset: true, force: false)
+                    // reset 必须留 false：true 会在 update() 里 dispose 掉自己正在用的 processDisposable，
+                    // 真机实测会把「输入翻译」整个弄没（34470 vs 34466 对照）。触发问题由语言码规范化解决。
+                    self.beginTranslationIfNecessary(reset: false, force: false)
                 case let .stylize(isComposeWithAI):
                     if isComposeWithAI {
                         component.externalState.result = ("", nil, [])

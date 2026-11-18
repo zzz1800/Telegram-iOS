@@ -387,10 +387,12 @@ final class TextProcessingTranslateContentComponent: Component {
                         }
                     }
                     
+                    // TGTranslate: 目标语言必须规范化再发。中文环境下 baseLanguageCode 是 `zh-Hans`，
+                    // 直接发给 messages.translateText 会被判 TO_LANG_INVALID → 结果 nil → UI 显示原文，
+                    // 表现为「每次都要手动重选一次语言才翻译」（下拉框给的是规范码 `zh`）。
+                    toLanguage = normalizeTranslationLanguage(toLanguage)
+                    TranslationLog.log("translate", "首帧请求 to=\(toLanguage) from=\(fromLanguage)")
                     component.externalState.result = (toLanguage, nil, [])
-                    // TGTranslate: 首帧也走 reset: true —— 与「手动重选语言」同一条路。
-                    // reset: false 时若 processDisposable 非 nil（上一次请求未清），守卫会直接挡住，
-                    // 请求根本不发，用户看到的就是原文（表现为「每次都要重选语言才翻译」）。
                     self.beginTranslationIfNecessary(reset: true, force: false)
                 case let .stylize(isComposeWithAI):
                     if isComposeWithAI {

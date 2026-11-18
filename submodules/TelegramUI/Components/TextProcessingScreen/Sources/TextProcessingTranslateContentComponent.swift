@@ -388,7 +388,10 @@ final class TextProcessingTranslateContentComponent: Component {
                     }
                     
                     component.externalState.result = (toLanguage, nil, [])
-                    self.beginTranslationIfNecessary(reset: false, force: false)
+                    // TGTranslate: 首帧也走 reset: true —— 与「手动重选语言」同一条路。
+                    // reset: false 时若 processDisposable 非 nil（上一次请求未清），守卫会直接挡住，
+                    // 请求根本不发，用户看到的就是原文（表现为「每次都要重选语言才翻译」）。
+                    self.beginTranslationIfNecessary(reset: true, force: false)
                 case let .stylize(isComposeWithAI):
                     if isComposeWithAI {
                         component.externalState.result = ("", nil, [])

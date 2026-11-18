@@ -200,22 +200,36 @@ func _internal_composeRichMessageWithAI(account: Account, instantPage: InstantPa
 }
 
 func _internal_translateTexts(network: Network, texts: [(String, [MessageTextEntity])], toLang: String, tone: TranslationTone = .neutral) -> Signal<[(String, [MessageTextEntity])], TranslationError> {
+    // TGTranslate: 本地通道优先；只要有一条拿不到结果就整体回退官方服务器。
+    // 之前是 `guard let translated else { return item }` —— 静默返回原文，UI 看起来像"点了没反应"。
     if let service = engineExperimentalInternalTranslationService {
         var payload: [AnyHashable: String] = [:]
         for (index, item) in texts.enumerated() {
             payload[AnyHashable(index)] = item.0
         }
         return service.translate(texts: payload, fromLang: "auto", toLang: toLang)
-        |> map { result in
-            texts.enumerated().map { index, item -> (String, [MessageTextEntity]) in
-                guard let translated = result?[AnyHashable(index)] else {
-                    return item
-                }
-                return (translated, [])
-            }
-        }
         |> castError(TranslationError.self)
+        |> mapToSignal { result -> Signal<[(String, [MessageTextEntity])], TranslationError> in
+            let values = result ?? [:]
+            var missing = values.isEmpty
+            if !missing {
+                for index in 0 ..< texts.count where (values[AnyHashable(index)] ?? "").isEmpty {
+                    missing = true
+                }
+            }
+            if missing {
+                TranslationLog.log("translate", "本地通道无结果，回退官方服务器 (批量 \(texts.count) 条, to=\(toLang))")
+                return _internal_translateTextsOfficial(network: network, texts: texts, toLang: toLang, tone: tone)
+            }
+            return .single(texts.enumerated().map { index, item -> (String, [MessageTextEntity]) in
+                return (values[AnyHashable(index)] ?? item.0, [])
+            })
+        }
     }
+    return _internal_translateTextsOfficial(network: network, texts: texts, toLang: toLang, tone: tone)
+}
+
+private func _internal_translateTextsOfficial(network: Network, texts: [(String, [MessageTextEntity])], toLang: String, tone: TranslationTone = .neutral) -> Signal<[(String, [MessageTextEntity])], TranslationError> {
     var flags: Int32 = 0
     flags |= (1 << 1)
     
